@@ -1,1 +1,242 @@
-<!doctype html><html lang="es"><meta charset="utf-8"><title>Licitaciones</title><style>body{font:16px system-ui;background:#eef2f6;color:#18304b;margin:40px}section{background:white;padding:22px;margin:15px 0;border-radius:12px}input,button,select{padding:10px;margin:4px;border:1px solid #bac8d4;border-radius:6px}button{background:#174b70;color:white}pre{white-space:pre-wrap}</style><h1>Gestión de licitaciones</h1><p>Administración de proveedores, concursos y ofertas · <a href="/docs">API interactiva</a></p><section><h2>Proveedores</h2><input id="nombre" placeholder="Nombre"><button onclick="send('proveedores','POST',{nombre:val('nombre')})">Registrar</button><button onclick="send('proveedores','GET')">Listar</button></section><section><h2>Licitaciones</h2><input id="codigo" placeholder="Código"><input id="titulo" placeholder="Título"><input id="presupuesto" type="number" placeholder="Presupuesto CRC"><input id="cierre" type="datetime-local"><button onclick="send('licitaciones','POST',{codigo:val('codigo'),titulo:val('titulo'),presupuesto:val('presupuesto'),cierre:new Date(val('cierre')).toISOString()})">Crear</button><button onclick="send('licitaciones','GET')">Listar</button><input id="lid" type="number" placeholder="ID licitación"><button onclick="send('licitaciones/'+val('lid')+'/estado','PATCH',{estado:'Publicada'})">Publicar</button><button onclick="send('licitaciones/'+val('lid')+'/estado','PATCH',{estado:'Cerrada'})">Cerrar</button><button onclick="send('evaluacion/'+val('lid'),'GET')">Evaluar</button></section><section><h2>Ofertas</h2><input id="ol" type="number" placeholder="ID licitación"><input id="op" type="number" placeholder="ID proveedor"><input id="monto" type="number" placeholder="Monto CRC"><button onclick="send('ofertas','POST',{licitacion:+val('ol'),proveedor:+val('op'),monto:val('monto')})">Ofertar</button><button onclick="send('ofertas','GET')">Listar</button></section><section><h2>Tipo de cambio</h2><input id="rate" type="number" value="500"><button onclick="send('tasa/1','PUT',{valor:val('rate')})">Guardar tasa</button><button onclick="send('tasa','GET')">Consultar</button></section><section><h2>Resultado</h2><pre id="out"></pre></section><script>const val=id=>document.getElementById(id).value;async function send(path,method,data){try{let r=await fetch('/api/'+path,{method,headers:{'Content-Type':'application/json'},...(data?{body:JSON.stringify(data)}:{})});document.getElementById('out').textContent=r.status+'\n'+JSON.stringify(await r.json(),null,2)}catch(e){document.getElementById('out').textContent='Error de conexión'}}</script></html>
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gestión de licitaciones</title>
+<style>
+body { font: 1rem system-ui; background: #eef2f6; color: #18304b; max-width: 70rem; margin: auto; padding: 1rem; }
+section { background: white; padding: 1rem; margin-block: 1rem; border-radius: .75rem; overflow-x: auto; }
+form { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
+label { display: grid; gap: .25rem; }
+input, select, button { padding: .5rem; font: inherit; }
+button { cursor: pointer; }
+td, th { padding: .5rem; text-align: left; border-bottom: 1px solid #ccd5dc; }
+[role="alert"] { color: #9a2828; }
+</style>
+</head>
+<body>
+<h1>Gestión de licitaciones</h1>
+<section>
+  <h2>Moneda de visualización</h2>
+  <form id="tasa">
+    <label>CRC por USD <input name="valor" type="number" min="0" step="any" required></label>
+    <button>Guardar tasa</button>
+    <label>Mostrar importes en <select id="moneda"><option>CRC</option><option>USD</option></select></label>
+  </form>
+  <p id="tasa-actual"></p>
+</section>
+<p id="error" role="alert"></p>
+<p id="estado" role="status"></p>
+<section>
+  <h2>Proveedores</h2>
+  <form id="proveedor">
+    <label>Nombre <input name="nombre" required></label>
+    <button id="guardar-proveedor">Registrar proveedor</button>
+    <button id="cancelar" type="button" hidden>Cancelar edición</button>
+  </form>
+  <table><thead><tr><th>Nombre</th><th>Acción</th></tr></thead><tbody id="proveedores"></tbody></table>
+</section>
+<section>
+  <h2>Licitaciones</h2>
+  <form id="licitacion">
+    <label>Código <input name="codigo" required></label>
+    <label>Título <input name="titulo" required></label>
+    <label>Presupuesto CRC <input name="presupuesto" type="number" min="0.01" step="0.01" required></label>
+    <label>Cierre (hora local) <input name="cierre" type="datetime-local" required></label>
+    <button>Crear licitación</button>
+  </form>
+  <table><thead><tr><th>Código</th><th>Título</th><th>Presupuesto</th><th>Cierre</th><th>Estado</th><th>Acciones</th></tr></thead><tbody id="licitaciones"></tbody></table>
+  <h3>Evaluación</h3>
+  <p id="evaluacion" aria-live="polite">Selecciona Evaluar en una licitación.</p>
+</section>
+<section>
+  <h2>Ofertas</h2>
+  <form id="oferta">
+    <label>Licitación para ofertar <select name="licitacion" required></select></label>
+    <label>Proveedor <select name="proveedor" required></select></label>
+    <label>Monto CRC <input name="monto" type="number" min="0.01" step="0.01" required></label>
+    <button>Registrar oferta</button>
+  </form>
+  <p><label>Filtrar ofertas por licitación <select id="filtro"></select></label></p>
+  <table><thead><tr><th>Licitación</th><th>Proveedor</th><th>Monto</th></tr></thead><tbody id="ofertas"></tbody></table>
+</section>
+<script>
+const el = id => document.getElementById(id);
+const formOferta = el('oferta');
+let datos;
+let proveedorEditado = null;
+let licitacionEvaluada = null;
+let evaluacion;
+
+async function api(ruta, method = 'GET', datos) {
+  const opciones = { method };
+  if (datos) {
+    opciones.headers = { 'Content-Type': 'application/json' };
+    opciones.body = JSON.stringify(datos);
+  }
+  let respuesta;
+  try {
+    respuesta = await fetch('/api/' + ruta, opciones);
+  } catch {
+    throw new Error('No se pudo conectar con el servidor.');
+  }
+  if (!respuesta.ok) {
+    const cuerpo = await respuesta.json().catch(() => ({}));
+    const mensaje = respuesta.status < 500 && typeof cuerpo.detail === 'string'
+      ? cuerpo.detail : 'No se pudo completar la solicitud (' + respuesta.status + ').';
+    throw new Error(mensaje);
+  }
+  return respuesta.json();
+}
+
+async function ejecutar(accion) {
+  el('error').textContent = '';
+  el('estado').textContent = '';
+  try {
+    await accion();
+  } catch (error) {
+    el('error').textContent = error.message;
+  }
+}
+
+function importe(centimos) {
+  const moneda = el('moneda').value;
+  const divisor = moneda === 'USD' ? Number(datos.tasa.valor) : 1;
+  return new Intl.NumberFormat('es-CR', { style: 'currency', currency: moneda })
+    .format(centimos / 100 / divisor);
+}
+
+function fecha(valor) {
+  return valor === 'inicial' ? 'Tasa inicial' : new Date(valor).toLocaleString('es-CR');
+}
+
+function fila(...valores) {
+  const tr = document.createElement('tr');
+  for (const valor of valores) {
+    const td = tr.insertCell();
+    td.append(valor);
+  }
+  return tr;
+}
+
+function boton(texto, accion) {
+  const elemento = document.createElement('button');
+  elemento.type = 'button';
+  elemento.textContent = texto;
+  elemento.addEventListener('click', () => ejecutar(accion));
+  return elemento;
+}
+
+function opciones(select, filas, campo, inicial) {
+  const anterior = select.value;
+  select.replaceChildren(new Option(inicial, ''), ...filas.map(fila => new Option(fila[campo], fila.id)));
+  if ([...select.options].some(opcion => opcion.value === anterior)) select.value = anterior;
+}
+
+function nombreProveedor(id) {
+  return datos.proveedores.find(proveedor => proveedor.id === id)?.nombre ?? String(id);
+}
+
+function renderizarOfertas() {
+  const filtro = el('filtro').value;
+  el('ofertas').replaceChildren(...datos.ofertas
+    .filter(oferta => !filtro || oferta.licitacion === Number(filtro))
+    .map(oferta => fila(datos.licitaciones.find(l => l.id === oferta.licitacion)?.codigo ?? String(oferta.licitacion),
+      nombreProveedor(oferta.proveedor), importe(oferta.monto))));
+}
+
+function renderizarEvaluacion() {
+  if (!evaluacion) return;
+  const codigo = datos.licitaciones.find(l => l.id === licitacionEvaluada)?.codigo;
+  el('evaluacion').textContent = codigo + ' · ' + (evaluacion.mensaje ??
+    (evaluacion.oferta ? [nombreProveedor(evaluacion.oferta.proveedor), importe(evaluacion.oferta.monto),
+      evaluacion.ahorro + '% de ahorro', evaluacion.clasificacion, evaluacion.aprobador].join(' · ') : ''));
+}
+
+function renderizarImportes() {
+  el('licitaciones').replaceChildren(...datos.licitaciones.map(l => {
+    const acciones = document.createElement('div');
+    if (l.estado === 'Borrador') acciones.append(boton('Publicar', () => cambiarEstado(l.id, 'Publicada')));
+    if (l.estado !== 'Cerrada') acciones.append(boton('Cerrar', () => cambiarEstado(l.id, 'Cerrada')));
+    acciones.append(boton('Evaluar', async () => {
+      evaluacion = await api('evaluacion/' + l.id);
+      licitacionEvaluada = l.id;
+      renderizarEvaluacion();
+    }));
+    return fila(l.codigo, l.titulo, importe(l.presupuesto), fecha(l.cierre), l.estado, acciones);
+  }));
+  renderizarOfertas();
+  renderizarEvaluacion();
+}
+
+async function cargar() {
+  const [proveedores, licitaciones, ofertas, tasas] = await Promise.all(
+    ['proveedores', 'licitaciones', 'ofertas', 'tasa'].map(ruta => api(ruta)));
+  datos = { proveedores, licitaciones, ofertas, tasa: tasas[0] };
+  if (licitacionEvaluada !== null) evaluacion = await api('evaluacion/' + licitacionEvaluada);
+  el('tasa').elements.valor.value = datos.tasa.valor;
+  el('tasa-actual').textContent = datos.tasa.valor + ' CRC por USD · ' + fecha(datos.tasa.fecha);
+  el('proveedores').replaceChildren(...proveedores.map(p => fila(p.nombre, boton('Editar ' + p.nombre, () => {
+    proveedorEditado = p.id;
+    el('proveedor').elements.nombre.value = p.nombre;
+    el('guardar-proveedor').textContent = 'Guardar proveedor';
+    el('cancelar').hidden = false;
+    el('proveedor').elements.nombre.focus();
+  }))));
+  opciones(formOferta.elements.licitacion, licitaciones.filter(l => l.estado === 'Publicada'), 'codigo', 'Seleccionar licitación');
+  opciones(formOferta.elements.proveedor, proveedores, 'nombre', 'Seleccionar proveedor');
+  opciones(el('filtro'), licitaciones, 'codigo', 'Todas');
+  renderizarImportes();
+}
+
+function terminarEdicion() {
+  proveedorEditado = null;
+  el('proveedor').reset();
+  el('guardar-proveedor').textContent = 'Registrar proveedor';
+  el('cancelar').hidden = true;
+}
+
+async function cambiarEstado(id, estado) {
+  await api('licitaciones/' + id + '/estado', 'PATCH', { estado });
+  await cargar();
+  el('estado').textContent = 'Estado actualizado a ' + estado + '.';
+}
+
+function alEnviar(id, guardar, mensaje) {
+  const formulario = el(id);
+  formulario.addEventListener('submit', evento => {
+    evento.preventDefault();
+    const enviar = evento.submitter;
+    const valores = Object.fromEntries(new FormData(formulario));
+    enviar.disabled = true;
+    ejecutar(async () => {
+      await guardar(valores);
+      await cargar();
+      el('estado').textContent = mensaje;
+    }).finally(() => { enviar.disabled = false; });
+  });
+}
+
+alEnviar('proveedor', async datos => {
+  if (proveedorEditado === null) await api('proveedores', 'POST', datos);
+  else await api('proveedores/' + proveedorEditado, 'PUT', datos);
+  terminarEdicion();
+}, 'Proveedor guardado.');
+alEnviar('licitacion', async datos => {
+  datos.cierre = new Date(datos.cierre).toISOString();
+  await api('licitaciones', 'POST', datos);
+  el('licitacion').reset();
+}, 'Licitación creada.');
+alEnviar('oferta', async datos => {
+  await api('ofertas', 'POST', datos);
+  formOferta.elements.monto.value = '';
+}, 'Oferta registrada.');
+alEnviar('tasa', datos => api('tasa/1', 'PUT', datos), 'Tasa guardada.');
+el('cancelar').addEventListener('click', terminarEdicion);
+el('moneda').addEventListener('change', () => { if (datos) renderizarImportes(); });
+el('filtro').addEventListener('change', () => { if (datos) renderizarOfertas(); });
+ejecutar(cargar);
+</script>
+</body>
+</html>
