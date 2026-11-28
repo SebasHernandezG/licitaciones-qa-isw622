@@ -25,3 +25,5 @@ Abrir <http://127.0.0.1:8000>. API interactiva: <http://127.0.0.1:8000/docs>. La
 La versión original de `app.py`, `index.html` y `test_app.py` provino del ZIP `Licitaciones_avance.zip` aportado por Laura. Este repositorio conserva esa procedencia; los siguientes paquetes proponen cambios asistidos por IA que requieren validación humana. El resultado técnico de una ejecución automatizada no equivale a aceptación del equipo.
 
 Ver [plan de aportes](PLAN_APORTES.md) para el orden de ramas, commits y Pull Requests. Las plantillas institucionales Word y Excel aún deben incorporarse y completarse con ejecuciones reales.
+
+
