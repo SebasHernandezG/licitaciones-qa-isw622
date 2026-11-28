@@ -69,7 +69,7 @@ def estado(id:int,p:Estado):
     if not transicion(l['estado'],p.estado) or (p.estado=='Publicada' and fecha(l['cierre'])<=now()): raise HTTPException(409,'Transición inválida')
     return ejecutar('UPDATE licitaciones SET estado=? WHERE id=?',(p.estado,id))
 def validar_oferta(l,m,instante):
-    if l['estado']!='Publicada' or instante>fecha(l['cierre']): raise HTTPException(409,'Licitación no disponible')
+    if l['estado']!='Publicada' or instante>=fecha(l['cierre']): raise HTTPException(409,'Licitación no disponible')
     if m>l['presupuesto']: raise HTTPException(422,'Supera presupuesto')
 @app.post('/api/ofertas',dependencies=[Depends(auth)],status_code=201)
 def ofertar(p:Oferta):
